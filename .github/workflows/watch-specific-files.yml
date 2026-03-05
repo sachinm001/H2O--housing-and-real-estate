@@ -1,0 +1,69 @@
+name: Monitor Upstream File Commit
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # every 6 hours
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+
+      - name: Add upstream
+        run: |
+          git remote add upstream https://github.com/sachinym/H2O--housing-and-real-estate.git
+          git fetch upstream
+
+      - name: Get latest commit for file
+        id: upstream_commit
+        run: |
+          FILE_PATH="sachinm001/H2O--housing-and-real-estate/about.html"
+
+          LATEST_COMMIT=$(git log upstream/main -n 1 --pretty=format:%H -- $FILE_PATH)
+          echo "latest_commit=$LATEST_COMMIT" >> $GITHUB_OUTPUT
+
+      - name: Read last checked commit
+        id: previous_commit
+        run: |
+          if [ -f .last_commit ]; then
+            PREV=$(cat .last_commit)
+          else
+            PREV=""
+          fi
+          echo "prev_commit=$PREV" >> $GITHUB_OUTPUT
+
+      - name: Send Email if new commit exists
+        if: steps.upstream_commit.outputs.latest_commit != steps.previous_commit.outputs.prev_commit
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.office365.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "Upstream File Updated"
+          to: person@example.com
+          from: github-monitor@example.com
+          body: |
+            A new commit has been detected in the upstream repository for file:
+
+            path/to/target/file.yml
+
+            Commit: ${{ steps.upstream_commit.outputs.latest_commit }}
+
+      - name: Store latest commit
+        if: steps.upstream_commit.outputs.latest_commit != steps.previous_commit.outputs.prev_commit
+        run: |
+          echo "${{ steps.upstream_commit.outputs.latest_commit }}" > .last_commit
+
+      - name: Commit updated commit hash
+        if: steps.upstream_commit.outputs.latest_commit != steps.previous_commit.outputs.prev_commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add .last_commit
+          git commit -m "Update last upstream commit reference"
+          git push
